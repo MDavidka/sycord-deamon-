@@ -107,6 +107,7 @@ curl -X POST https://api.sycord.site/api/deploy/projects/<projectId>/deploy \
 sycord-runner start        # Start all services
 sycord-runner stop         # Stop all services
 sycord-runner restart      # Restart all services
+sycord-runner reconfigure  # Re-run onboarding with saved .env values (non-interactive)
 sycord-runner status       # Show PM2 + Docker status
 sycord-runner logs         # Watch live logs
 sycord-runner health       # Check API health
@@ -116,8 +117,13 @@ sycord-runner api <method> <path> [-d <data>]  # Call any API endpoint
 pm2 status                 # View all processes
 pm2 logs sycord-runner     # API server logs
 pm2 logs cloudflared-tunnel  # Tunnel logs
+pm2 logs sycord-watcher    # GitHub repo watcher logs
 pm2 restart all            # Restart all processes
 ```
+
+### GitHub Auto-Watcher
+
+The `sycord-watcher` PM2 process polls the [sycord-deamon](https://github.com/MDavidka/sycord-deamon) repository every 60 seconds. When new commits are detected on `main`, it auto-pulls and restarts all services. No manual intervention needed for updates.
 
 ### CLI API Examples
 
@@ -138,7 +144,8 @@ sycord-runner api POST /api/deploy/projects/<id>/deploy
 ├── api.json             # OpenAPI specification
 ├── package.json         # Node.js dependencies
 ├── bin/
-│   └── runner.js        # CLI tool (sycord-runner command)
+│   ├── runner.js        # CLI tool (sycord-runner command)
+│   └── watcher.js       # GitHub repo auto-update watcher
 ├── src/
 │   ├── index.js         # Main server + domain router
 │   ├── config.js        # Configuration loader

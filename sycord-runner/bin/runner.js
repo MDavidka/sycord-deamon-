@@ -37,6 +37,7 @@ ${BOLD}Commands:${NC}
   ${CYAN}start${NC}        Start the runner API and Cloudflare tunnel via PM2
   ${CYAN}stop${NC}         Stop all Sycord Runner processes
   ${CYAN}restart${NC}      Restart all Sycord Runner processes
+  ${CYAN}reconfigure${NC}  Re-run onboarding using saved env vars (non-interactive)
   ${CYAN}status${NC}       Show status of all processes
   ${CYAN}logs${NC}         Show live logs (Ctrl+C to exit)
   ${CYAN}setup${NC}        Run the interactive setup wizard
@@ -45,6 +46,7 @@ ${BOLD}Commands:${NC}
 
 ${BOLD}Examples:${NC}
   sycord-runner start
+  sycord-runner reconfigure
   sycord-runner status
   sycord-runner logs
   sycord-runner health
@@ -72,7 +74,7 @@ function cmdStart() {
 
 function cmdStop() {
   info('Stopping all Sycord Runner processes...');
-  run('pm2 stop sycord-runner cloudflared-tunnel', { ignoreError: true });
+  run('pm2 stop sycord-runner cloudflared-tunnel sycord-watcher', { ignoreError: true });
   log('Processes stopped');
 }
 
@@ -141,6 +143,23 @@ function cmdSetup() {
   }
 }
 
+function cmdReconfigure() {
+  info('Reconfiguring Sycord Runner using saved .env values...');
+  const envPath = path.join(INSTALL_DIR, '.env');
+  if (!fs.existsSync(envPath)) {
+    err('No .env file found. Run interactive setup first: sycord-runner setup');
+  }
+
+  const setupScript = path.join(INSTALL_DIR, 'setup.sh');
+  if (!fs.existsSync(setupScript)) {
+    err('setup.sh not found. Re-clone the repository.');
+  }
+
+  // Source the existing .env and run setup in reconfigure mode
+  const cmd = `source ${envPath} 2>/dev/null; export $(grep -v '^#' ${envPath} | xargs); bash ${setupScript} --reconfigure`;
+  run(cmd, { cwd: INSTALL_DIR });
+}
+
 function cmdApi(args) {
   const envPath = path.join(INSTALL_DIR, '.env');
   let apiKey = '';
@@ -193,14 +212,15 @@ if (command === 'version' || command === '--version' || command === '-v') {
 }
 
 switch (command) {
-  case 'start':   cmdStart(); break;
-  case 'stop':    cmdStop(); break;
-  case 'restart': cmdRestart(); break;
-  case 'status':  cmdStatus(); break;
-  case 'logs':    cmdLogs(); break;
-  case 'setup':   cmdSetup(); break;
-  case 'health':  cmdHealth(); break;
-  case 'api':     cmdApi(args.slice(1)); break;
+  case 'start':        cmdStart(); break;
+  case 'stop':         cmdStop(); break;
+  case 'restart':      cmdRestart(); break;
+  case 'reconfigure':  cmdReconfigure(); break;
+  case 'status':       cmdStatus(); break;
+  case 'logs':         cmdLogs(); break;
+  case 'setup':        cmdSetup(); break;
+  case 'health':       cmdHealth(); break;
+  case 'api':          cmdApi(args.slice(1)); break;
   default:
     err(`Unknown command: ${command}\nRun 'sycord-runner help' for usage.`);
 }

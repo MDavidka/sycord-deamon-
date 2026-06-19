@@ -11,6 +11,12 @@ BOLD='\033[1m'
 
 INSTALL_DIR="/opt/sycord-runner"
 GIT_REPO="https://github.com/MDavidka/sycord-deamon"
+RECONFIGURE=false
+
+# Check for --reconfigure flag
+if [[ "${1:-}" == "--reconfigure" ]]; then
+  RECONFIGURE=true
+fi
 
 log()  { echo -e "${GREEN}[✓]${NC} $1"; }
 warn() { echo -e "${YELLOW}[!]${NC} $1"; }
@@ -25,9 +31,15 @@ if [[ $EUID -ne 0 ]]; then
 fi
 
 echo ""
-echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${CYAN}║     Sycord Runner — Setup Wizard          ║${NC}"
-echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
+if [[ "$RECONFIGURE" == "true" ]]; then
+  echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${CYAN}║  Sycord Runner — Reconfigure (saved env) ║${NC}"
+  echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
+else
+  echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
+  echo -e "${BOLD}${CYAN}║     Sycord Runner — Setup Wizard          ║${NC}"
+  echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
+fi
 echo ""
 
 # ────────────────────────────────────────────────────
@@ -54,19 +66,38 @@ log "git $(git --version | awk '{print $3}')"
 # 2. Gather environment variables interactively
 # ────────────────────────────────────────────────────
 echo ""
-info "Environment Configuration"
-info "Leave blank to skip optional values. Press Ctrl+C to abort."
-echo ""
 
-read -p "  Cloudflare API Key              : " CF_API_KEY
-read -p "  Cloudflare Zone ID              : " CF_ZONE_ID
-read -p "  Cloudflare Account ID           : " CF_ACCOUNT_ID
-read -p "  MongoDB URI [default shown]     : " MONGO_URI
-MONGO_URI=${MONGO_URI:-mongodb://localhost:27017/sycord}
-read -p "  Domain (e.g. sycord.site)       : " DOMAIN
-DOMAIN=${DOMAIN:-sycord.site}
-read -p "  API Port [3000]                  : " PORT_NUM
-PORT_NUM=${PORT_NUM:-3000}
+if [[ "$RECONFIGURE" == "true" ]]; then
+  info "Reconfigure mode — loading saved environment variables from ${INSTALL_DIR}/.env"
+  if [[ -f "${INSTALL_DIR}/.env" ]]; then
+    set -a
+    source "${INSTALL_DIR}/.env" 2>/dev/null
+    set +a
+  else
+    err "No .env file found at ${INSTALL_DIR}/.env. Run full setup first."
+  fi
+  CF_API_KEY="${CLOUDFLARE_API_KEY:-}"
+  CF_ZONE_ID="${CLOUDFLARE_ZONE_ID:-}"
+  CF_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
+  MONGO_URI="${MONGO_URI:-mongodb://localhost:27017/sycord}"
+  DOMAIN="${CLOUDFLARE_DOMAIN:-sycord.site}"
+  PORT_NUM="${PORT:-3000}"
+  log "Loaded: domain=${DOMAIN} port=${PORT_NUM} mongo=${MONGO_URI}"
+else
+  info "Environment Configuration"
+  info "Leave blank to skip optional values. Press Ctrl+C to abort."
+  echo ""
+
+  read -p "  Cloudflare API Key              : " CF_API_KEY
+  read -p "  Cloudflare Zone ID              : " CF_ZONE_ID
+  read -p "  Cloudflare Account ID           : " CF_ACCOUNT_ID
+  read -p "  MongoDB URI [default shown]     : " MONGO_URI
+  MONGO_URI=${MONGO_URI:-mongodb://localhost:27017/sycord}
+  read -p "  Domain (e.g. sycord.site)       : " DOMAIN
+  DOMAIN=${DOMAIN:-sycord.site}
+  read -p "  API Port [3000]                  : " PORT_NUM
+  PORT_NUM=${PORT_NUM:-3000}
+fi
 
 # ────────────────────────────────────────────────────
 # 3. Create installation directory & .env
@@ -267,6 +298,19 @@ module.exports = {
       log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
       error_file: '/var/log/cloudflared-error.log',
       out_file: '/var/log/cloudflared-out.log',
+      merge_logs: true,
+    },
+    {
+      name: 'sycord-watcher',
+      script: 'bin/watcher.js',
+      cwd: '/opt/sycord-runner',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      error_file: '/var/log/sycord-watcher-error.log',
+      out_file: '/var/log/sycord-watcher-out.log',
       merge_logs: true,
     },
   ],
