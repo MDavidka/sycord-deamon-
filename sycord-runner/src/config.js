@@ -17,12 +17,6 @@ const config = {
     uri: process.env.MONGO_URI || 'mongodb://localhost:27017/sycord',
   },
 
-  ubuntu: {
-    username: process.env.UBUNTU_USERNAME,
-    password: process.env.UBUNTU_PSW,
-    ip: process.env.UBUNTU_IP,
-  },
-
   docker: {
     network: process.env.DOCKER_NETWORK || 'sycord_network',
     workspaceBase: process.env.WORKSPACE_BASE || path.resolve(__dirname, '..', 'workspace'),

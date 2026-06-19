@@ -67,9 +67,6 @@ CLOUDFLARE_ACCOUNT_ID=${config.accountId}
 MONGO_URI=${config.mongoUri}
 CLOUDFLARE_DOMAIN=${config.domain}
 PORT=${config.port}
-UBUNTU_USERNAME=
-UBUNTU_PSW=
-UBUNTU_IP=
 NODE_ENV=production
 DOCKER_NETWORK=sycord_network
 WORKSPACE_BASE=${INSTALL_DIR}/workspace
@@ -141,39 +138,20 @@ ingress:
     logEvent(`Tunnel config error: ${e.message}`, 'error');
   }
 
-  // Step 4: Clone sycord-deamon
+  // Step 4: Ensure runner source is updated
   try {
-    logEvent('Cloning sycord-deamon...', 'info');
-    const deamonDir = path.join(INSTALL_DIR, 'sycord-deamon');
-    if (fs.existsSync(path.join(deamonDir, '.git'))) {
-      execSync('git pull origin main', { cwd: deamonDir, stdio: 'pipe', timeout: 30000 });
-      logEvent('Daemon repository updated', 'success');
+    logEvent('Pulling latest runner source...', 'info');
+    if (fs.existsSync(path.join(INSTALL_DIR, '.git'))) {
+      execSync('git pull origin main', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 30000 });
+      logEvent('Runner source updated via git pull', 'success');
     } else {
-      execSync('git clone https://github.com/MDavidka/sycord-deamon ' + deamonDir, { stdio: 'pipe', timeout: 60000 });
-      logEvent('Daemon repository cloned', 'success');
+      logEvent('Not a git repository — using existing source', 'warn');
     }
   } catch (e) {
-    logEvent(`Daemon clone warning: ${e.message}`, 'warn');
+    logEvent(`Source update warning: ${e.message}`, 'warn');
   }
 
-  // Step 5: Copy source files
-  try {
-    logEvent('Copying source files...', 'info');
-    const srcDir = path.resolve(__dirname, '..');
-    if (srcDir !== INSTALL_DIR) {
-      execSync(`cp -a ${srcDir}/src ${INSTALL_DIR}/ 2>/dev/null || true`);
-      execSync(`cp -a ${srcDir}/bin ${INSTALL_DIR}/ 2>/dev/null || true`);
-      execSync(`cp -a ${srcDir}/docker ${INSTALL_DIR}/ 2>/dev/null || true`);
-      execSync(`cp ${srcDir}/package.json ${INSTALL_DIR}/ 2>/dev/null || true`);
-      execSync(`cp ${srcDir}/ecosystem.config.js ${INSTALL_DIR}/ 2>/dev/null || true`);
-      execSync(`cp ${srcDir}/api.json ${INSTALL_DIR}/ 2>/dev/null || true`);
-    }
-    logEvent('Source files copied', 'success');
-  } catch (e) {
-    logEvent(`File copy warning: ${e.message}`, 'warn');
-  }
-
-  // Step 6: Install npm dependencies
+  // Step 5: Install npm dependencies
   try {
     logEvent('Installing Node.js dependencies...', 'info');
     execSync('npm install --production', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 120000 });
@@ -182,7 +160,7 @@ ingress:
     logEvent(`npm install failed: ${e.message}`, 'error');
   }
 
-  // Step 7: Install CLI globally
+  // Step 6: Install CLI globally
   try {
     logEvent('Installing CLI command...', 'info');
     fs.chmodSync(path.join(INSTALL_DIR, 'bin', 'runner.js'), 0o755);
@@ -193,7 +171,7 @@ ingress:
     logEvent(`CLI install warning: ${e.message}`, 'warn');
   }
 
-  // Step 8: Docker network
+  // Step 7: Docker network
   try {
     logEvent('Setting up Docker network...', 'info');
     try { execSync('docker network inspect sycord_network', { stdio: 'pipe' }); } catch {
@@ -204,7 +182,7 @@ ingress:
     logEvent(`Docker network error: ${e.message}`, 'error');
   }
 
-  // Step 9: PM2
+  // Step 8: PM2
   try {
     logEvent('Installing PM2...', 'info');
     try { execSync('which pm2', { stdio: 'pipe' }); } catch {
@@ -275,7 +253,7 @@ ingress:
     logEvent(`PM2 error: ${e.message}`, 'error');
   }
 
-  // Step 10: Verify
+  // Step 9: Verify
   try {
     logEvent('Verifying deployment...', 'info');
     const runnerStatus = execSync('pm2 show sycord-runner 2>/dev/null && echo "online" || echo "offline"', { stdio: 'pipe' }).toString().trim();

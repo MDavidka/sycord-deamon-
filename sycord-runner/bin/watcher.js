@@ -4,7 +4,6 @@ const { execSync } = require('child_process');
 const path = require('path');
 
 const INSTALL_DIR = '/opt/sycord-runner';
-const DEAMON_DIR = path.join(INSTALL_DIR, 'sycord-deamon');
 const POLL_INTERVAL_MS = 60 * 1000;
 const GIT_REPO = 'https://github.com/MDavidka/sycord-deamon';
 
@@ -16,23 +15,21 @@ async function sleep(ms) {
 
 async function checkAndPull() {
   try {
-    if (!require('fs').existsSync(path.join(DEAMON_DIR, '.git'))) {
-      log(`Cloning ${GIT_REPO}...`);
-      execSync(`git clone ${GIT_REPO} ${DEAMON_DIR}`, { stdio: 'pipe', timeout: 30000 });
-      log('Repository cloned successfully.');
-      restartServices();
+    if (!require('fs').existsSync(path.join(INSTALL_DIR, '.git'))) {
+      log(`Runner source not a git repo — skipping watcher`);
       return;
     }
 
-    execSync('git fetch origin', { cwd: DEAMON_DIR, stdio: 'pipe', timeout: 15000 });
+    execSync('git fetch origin', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 15000 });
 
-    const localHash = execSync('git rev-parse HEAD', { cwd: DEAMON_DIR, stdio: 'pipe', timeout: 5000 }).toString().trim();
-    const remoteHash = execSync('git rev-parse origin/main', { cwd: DEAMON_DIR, stdio: 'pipe', timeout: 5000 }).toString().trim();
+    const localHash = execSync('git rev-parse HEAD', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 5000 }).toString().trim();
+    const remoteHash = execSync('git rev-parse origin/main', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 5000 }).toString().trim();
 
     if (localHash !== remoteHash) {
       log(`New commits detected: ${localHash.substring(0, 7)} → ${remoteHash.substring(0, 7)}`);
-      execSync('git pull origin main', { cwd: DEAMON_DIR, stdio: 'pipe', timeout: 30000 });
-      log('Repository updated. Restarting services...');
+      execSync('git pull origin main', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 30000 });
+      execSync('npm install --production', { cwd: INSTALL_DIR, stdio: 'pipe', timeout: 60000 });
+      log('Runner source updated. Restarting services...');
       restartServices();
     }
   } catch (err) {
@@ -42,7 +39,7 @@ async function checkAndPull() {
 
 function restartServices() {
   try {
-    execSync('pm2 restart sycord-runner cloudflared-tunnel', { stdio: 'pipe', timeout: 10000 });
+    execSync('pm2 restart sycord-runner cloudflared-tunnel sycord-watcher', { stdio: 'pipe', timeout: 10000 });
     log('Services restarted via PM2.');
   } catch (err) {
     log(`Failed to restart services: ${err.message}`);

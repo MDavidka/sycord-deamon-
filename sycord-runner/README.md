@@ -63,9 +63,6 @@ sycord-runner health   # Check API health
 | `CLOUDFLARE_DOMAIN`   | Yes      | Your wildcard domain (e.g. `sycord.site`)         |
 | `MONGO_URI`           | No       | MongoDB connection string (default: localhost)    |
 | `PORT`                | No       | Internal API port (default: 3000)                 |
-| `UBUNTU_USERNAME`     | No       | SSH username for remote bootstrapping             |
-| `UBUNTU_PSW`          | No       | SSH password for remote bootstrapping             |
-| `UBUNTU_IP`           | No       | Server IP for remote bootstrapping                |
 
 ## API Reference
 
@@ -142,7 +139,7 @@ pm2 restart all            # Restart all processes
 
 ### GitHub Auto-Watcher
 
-The `sycord-watcher` PM2 process polls the [sycord-deamon](https://github.com/MDavidka/sycord-deamon) repository every 60 seconds. When new commits are detected on `main`, it auto-pulls and restarts all services. No manual intervention needed for updates.
+The `sycord-watcher` PM2 process polls its own git repository every 60 seconds. When new commits are detected on `main`, it auto-pulls, runs `npm install`, and restarts all services. No manual intervention needed for updates.
 
 ### CLI API Examples
 
@@ -182,7 +179,7 @@ sycord-runner api POST /api/deploy/projects/<id>/deploy
 │   └── Dockerfile.nextjs # Docker image for Next.js apps
 ├── workspace/
 │   └── <project-uuid>/   # Isolated project workspaces
-└── sycord-deamon/        # Cloned Sycord Deamon repository
+└── .git/                 # Git repo for self-updating runner source
 ```
 
 ## Security
