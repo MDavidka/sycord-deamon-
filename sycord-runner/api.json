@@ -1,0 +1,354 @@
+{
+  "openapi": "3.0.3",
+  "info": {
+    "title": "Sycord Runner API",
+    "description": "API for managing and deploying Next.js applications in isolated Docker containers behind a Cloudflare Wildcard Tunnel.",
+    "version": "1.0.0",
+    "contact": {
+      "name": "Sycord",
+      "url": "https://sycord.com"
+    }
+  },
+  "servers": [
+    {
+      "url": "https://api.sycord.site",
+      "description": "Production API server"
+    }
+  ],
+  "security": [
+    {
+      "ApiKeyAuth": []
+    }
+  ],
+  "securitySchemes": {
+    "ApiKeyAuth": {
+      "type": "apiKey",
+      "in": "header",
+      "name": "X-API-Key",
+      "description": "Your Cloudflare API Key used as authentication token. Must match CLOUDFLARE_API_KEY env var."
+    }
+  },
+  "paths": {
+    "/api/health": {
+      "get": {
+        "tags": ["Health"],
+        "summary": "Health check",
+        "description": "Returns the current health status and uptime of the runner service.",
+        "security": [],
+        "responses": {
+          "200": {
+            "description": "Service is healthy",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "status": { "type": "string", "example": "ok" },
+                    "service": { "type": "string", "example": "sycord-runner" },
+                    "version": { "type": "string", "example": "1.0.0" },
+                    "domain": { "type": "string", "example": "sycord.site" },
+                    "uptime": { "type": "number", "example": 3600 },
+                    "timestamp": { "type": "string", "format": "date-time" }
+                  }
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/deploy/projects": {
+      "get": {
+        "tags": ["Projects"],
+        "summary": "List all projects",
+        "description": "Returns all projects with their workspace metadata and container status.",
+        "responses": {
+          "200": {
+            "description": "List of projects",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "projects": {
+                      "type": "array",
+                      "items": {
+                        "type": "object",
+                        "properties": {
+                          "id": { "type": "string", "format": "uuid" },
+                          "name": { "type": "string" },
+                          "domain": { "type": "string" },
+                          "status": { "type": "string", "enum": ["created", "files_written", "building", "build_complete", "build_failed", "deployed", "stopped"] },
+                          "container": { "type": ["object", "null"] }
+                        }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "tags": ["Projects"],
+        "summary": "Create a new project workspace",
+        "description": "Creates a new isolated workspace directory and reserves a project name/subdomain.",
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["projectName"],
+                "properties": {
+                  "projectName": {
+                    "type": "string",
+                    "pattern": "^[a-z0-9-]+$",
+                    "description": "Lowercase alphanumeric with hyphens. Will be used as subdomain: <projectName>.sycord.site",
+                    "example": "my-nextjs-app"
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "Workspace created",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string" },
+                    "project": {
+                      "type": "object",
+                      "properties": {
+                        "id": { "type": "string", "format": "uuid" },
+                        "name": { "type": "string" },
+                        "domain": { "type": "string" },
+                        "workspacePath": { "type": "string" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Invalid project name" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}/files": {
+      "put": {
+        "tags": ["Projects"],
+        "summary": "Write source files to workspace",
+        "description": "Writes application source files (pages, components, configs) into the project workspace. Accepts an array of file objects with path and content.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "The UUID of the project workspace"
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "required": ["files"],
+                "properties": {
+                  "files": {
+                    "type": "array",
+                    "items": {
+                      "type": "object",
+                      "required": ["path", "content"],
+                      "properties": {
+                        "path": { "type": "string", "description": "Relative path within workspace (e.g., pages/index.js)", "example": "pages/index.js" },
+                        "content": { "type": "string", "description": "File contents as string", "example": "export default function Home() { return <h1>Hello</h1> }" }
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": { "description": "Files written successfully" },
+          "404": { "description": "Project not found" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}/build": {
+      "post": {
+        "tags": ["Build"],
+        "summary": "Build the Next.js project",
+        "description": "Runs `npm install` and `npx next build` inside the project workspace on the host machine. Build artifacts stay in the workspace for container mount.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "The UUID of the project workspace"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Build completed",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Build completed successfully" },
+                    "project": { "type": "object" },
+                    "result": { "type": "object" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Build failed" },
+          "404": { "description": "Project not found" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}/deploy": {
+      "post": {
+        "tags": ["Deploy"],
+        "summary": "Deploy project to Docker container",
+        "description": "Builds Docker image using the workspace and starts an isolated container. Maps an internal port and registers the subdomain route. The workspace directory is bind-mounted into the container.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" },
+            "description": "The UUID of the project workspace"
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "Deployment complete",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "message": { "type": "string", "example": "Deployment complete" },
+                    "project": { "type": "object" },
+                    "url": { "type": "string", "example": "https://my-nextjs-app.sycord.site" }
+                  }
+                }
+              }
+            }
+          },
+          "400": { "description": "Project not built yet" },
+          "404": { "description": "Project not found" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}/stop": {
+      "post": {
+        "tags": ["Deploy"],
+        "summary": "Stop and remove container",
+        "description": "Stops and removes the Docker container for a project. Files persist in the workspace.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Container stopped" },
+          "404": { "description": "Project not found" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}": {
+      "delete": {
+        "tags": ["Projects"],
+        "summary": "Delete project entirely",
+        "description": "Stops container, removes workspace files, and releases the port. Irreversible.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Project deleted" },
+          "404": { "description": "Project not found" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}/logs": {
+      "get": {
+        "tags": ["Projects"],
+        "summary": "Get container logs",
+        "description": "Retrieves the last N lines of container logs for a project.",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          },
+          {
+            "name": "tail",
+            "in": "query",
+            "schema": { "type": "integer", "default": 100 },
+            "description": "Number of log lines to return"
+          }
+        ],
+        "responses": {
+          "200": { "description": "Container logs" },
+          "404": { "description": "Project or container not found" }
+        }
+      }
+    },
+    "/api/deploy/projects/{projectId}/status": {
+      "get": {
+        "tags": ["Projects"],
+        "summary": "Get project and container status",
+        "parameters": [
+          {
+            "name": "projectId",
+            "in": "path",
+            "required": true,
+            "schema": { "type": "string", "format": "uuid" }
+          }
+        ],
+        "responses": {
+          "200": { "description": "Project status with container info" },
+          "404": { "description": "Project not found" }
+        }
+      }
+    }
+  },
+  "tags": [
+    { "name": "Health", "description": "Service health and status" },
+    { "name": "Projects", "description": "Project lifecycle management" },
+    { "name": "Build", "description": "Next.js build operations" },
+    { "name": "Deploy", "description": "Docker container deployment" }
+  ],
+  "x-lifecycle": {
+    "description": "Typical deployment workflow",
+    "steps": [
+      { "step": 1, "method": "POST", "path": "/api/deploy/projects", "description": "Create project workspace" },
+      { "step": 2, "method": "PUT", "path": "/api/deploy/projects/{projectId}/files", "description": "Write source files" },
+      { "step": 3, "method": "POST", "path": "/api/deploy/projects/{projectId}/build", "description": "Build the Next.js application" },
+      { "step": 4, "method": "POST", "path": "/api/deploy/projects/{projectId}/deploy", "description": "Deploy to Docker container" }
+    ]
+  }
+}

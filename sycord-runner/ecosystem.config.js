@@ -1,0 +1,38 @@
+module.exports = {
+  apps: [
+    {
+      name: 'sycord-runner',
+      script: 'src/index.js',
+      cwd: '/opt/sycord-runner',
+      env: {
+        NODE_ENV: 'production',
+      },
+      env_file: '.env',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_memory_restart: '512M',
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      error_file: '/var/log/sycord-runner-error.log',
+      out_file: '/var/log/sycord-runner-out.log',
+      merge_logs: true,
+    },
+    {
+      name: 'cloudflared-tunnel',
+      script: 'cloudflared',
+      args: 'tunnel run --url http://localhost:3000 sycord-tunnel',
+      cwd: '/opt/sycord-runner',
+      interpreter: 'none',
+      instances: 1,
+      exec_mode: 'fork',
+      autorestart: true,
+      watch: false,
+      max_restarts: 10,
+      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
+      error_file: '/var/log/cloudflared-error.log',
+      out_file: '/var/log/cloudflared-out.log',
+      merge_logs: true,
+    },
+  ],
+};
