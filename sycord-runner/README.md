@@ -23,8 +23,27 @@ Users      →  myapp.sycord.site (Cloudflare Tunnel)  →  Router →  Docker C
 
 ## Quick Install
 
+On your Ubuntu VM, run this single command:
+
 ```bash
 curl -sL https://raw.githubusercontent.com/MDavidka/sycord-deamon/main/setup.sh | sudo bash
+```
+
+This starts the **web-based setup wizard**. Open the URL printed in your terminal to a browser and fill out the form. No SSH interaction needed beyond the initial command.
+
+**What it does automatically:**
+- Installs cloudflared and creates the wildcard tunnel (`*.sycord.site`)
+- Writes environment configuration
+- Installs npm dependencies, PM2, and Docker network
+- Starts the runner API, tunnel, and GitHub auto-watcher
+- Enables auto-start on VM reboot
+- Installs the `sycord-runner` CLI command
+
+After setup, manage the service from the VM:
+```bash
+sycord-runner status   # View all processes
+sycord-runner logs     # Watch live logs
+sycord-runner health   # Check API health
 ```
 
 ## Prerequisites
@@ -145,6 +164,7 @@ sycord-runner api POST /api/deploy/projects/<id>/deploy
 ├── package.json         # Node.js dependencies
 ├── bin/
 │   ├── runner.js        # CLI tool (sycord-runner command)
+│   ├── setup-server.js  # Web-based setup wizard
 │   └── watcher.js       # GitHub repo auto-update watcher
 ├── src/
 │   ├── index.js         # Main server + domain router

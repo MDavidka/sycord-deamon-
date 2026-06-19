@@ -2,8 +2,8 @@
 set -euo pipefail
 
 # ────────────────────────────────────────────────────────────
-# Sycord Runner — Interactive Setup Script
-# Installs and configures the deployment runner on Ubuntu
+# Sycord Runner — Bootstrapper
+# Downloads the runner, then starts the web-based setup wizard.
 # ────────────────────────────────────────────────────────────
 
 RED='\033[0;31m'; GREEN='\033[0;32m'; CYAN='\033[0;36m'; YELLOW='\033[1;33m'; NC='\033[0m'
@@ -11,9 +11,9 @@ BOLD='\033[1m'
 
 INSTALL_DIR="/opt/sycord-runner"
 GIT_REPO="https://github.com/MDavidka/sycord-deamon"
+SETUP_PORT="${SETUP_PORT:-8443}"
 RECONFIGURE=false
 
-# Check for --reconfigure flag
 if [[ "${1:-}" == "--reconfigure" ]]; then
   RECONFIGURE=true
 fi
@@ -24,22 +24,16 @@ err()  { echo -e "${RED}[✗]${NC} $1"; exit 1; }
 info() { echo -e "${CYAN}[i]${NC} $1"; }
 
 # ────────────────────────────────────────────────────
-# 0. Root check
+# Root check
 # ────────────────────────────────────────────────────
 if [[ $EUID -ne 0 ]]; then
   err "This script must be run as root (sudo). Try: curl -sL https://... | sudo bash"
 fi
 
 echo ""
-if [[ "$RECONFIGURE" == "true" ]]; then
-  echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
-  echo -e "${BOLD}${CYAN}║  Sycord Runner — Reconfigure (saved env) ║${NC}"
-  echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
-else
-  echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
-  echo -e "${BOLD}${CYAN}║     Sycord Runner — Setup Wizard          ║${NC}"
-  echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
-fi
+echo -e "${BOLD}${CYAN}╔══════════════════════════════════════════╗${NC}"
+echo -e "${BOLD}${CYAN}║     Sycord Runner — Setup Bootstrapper    ║${NC}"
+echo -e "${BOLD}${CYAN}╚══════════════════════════════════════════╝${NC}"
 echo ""
 
 # ────────────────────────────────────────────────────
@@ -63,306 +57,67 @@ log "npm $(npm -v)"
 log "git $(git --version | awk '{print $3}')"
 
 # ────────────────────────────────────────────────────
-# 2. Gather environment variables interactively
+# 2. Clone/download runner source
 # ────────────────────────────────────────────────────
 echo ""
+info "Fetching runner source code..."
 
-if [[ "$RECONFIGURE" == "true" ]]; then
-  info "Reconfigure mode — loading saved environment variables from ${INSTALL_DIR}/.env"
-  if [[ -f "${INSTALL_DIR}/.env" ]]; then
-    set -a
-    source "${INSTALL_DIR}/.env" 2>/dev/null
-    set +a
-  else
-    err "No .env file found at ${INSTALL_DIR}/.env. Run full setup first."
-  fi
-  CF_API_KEY="${CLOUDFLARE_API_KEY:-}"
-  CF_ZONE_ID="${CLOUDFLARE_ZONE_ID:-}"
-  CF_ACCOUNT_ID="${CLOUDFLARE_ACCOUNT_ID:-}"
-  MONGO_URI="${MONGO_URI:-mongodb://localhost:27017/sycord}"
-  DOMAIN="${CLOUDFLARE_DOMAIN:-sycord.site}"
-  PORT_NUM="${PORT:-3000}"
-  log "Loaded: domain=${DOMAIN} port=${PORT_NUM} mongo=${MONGO_URI}"
+mkdir -p "${INSTALL_DIR}"
+
+if [[ -d "${INSTALL_DIR}/.git" ]]; then
+  git -C "${INSTALL_DIR}" pull origin main 2>/dev/null || warn "Could not pull latest — using cached version"
+  log "Runner source updated"
 else
-  info "Environment Configuration"
-  info "Leave blank to skip optional values. Press Ctrl+C to abort."
-  echo ""
-
-  read -p "  Cloudflare API Key              : " CF_API_KEY
-  read -p "  Cloudflare Zone ID              : " CF_ZONE_ID
-  read -p "  Cloudflare Account ID           : " CF_ACCOUNT_ID
-  read -p "  MongoDB URI [default shown]     : " MONGO_URI
-  MONGO_URI=${MONGO_URI:-mongodb://localhost:27017/sycord}
-  read -p "  Domain (e.g. sycord.site)       : " DOMAIN
-  DOMAIN=${DOMAIN:-sycord.site}
-  read -p "  API Port [3000]                  : " PORT_NUM
-  PORT_NUM=${PORT_NUM:-3000}
+  # Clone the runner repo
+  git clone "${GIT_REPO}" "${INSTALL_DIR}" 2>/dev/null || {
+    warn "Could not clone from ${GIT_REPO}"
+    warn "If you are running locally, ensure the source is at ${INSTALL_DIR}"
+    if [[ ! -f "${INSTALL_DIR}/bin/setup-server.js" ]]; then
+      err "Runner source not found and cannot be cloned. Place source at ${INSTALL_DIR} manually."
+    fi
+  }
+  log "Runner source cloned"
 fi
 
 # ────────────────────────────────────────────────────
-# 3. Create installation directory & .env
+# 3. Install npm dependencies for setup server
 # ────────────────────────────────────────────────────
 echo ""
-info "Creating installation directory at ${INSTALL_DIR}"
-
-mkdir -p "${INSTALL_DIR}"/{workspace,logs,docker}
-mkdir -p /var/log
-
-cat > "${INSTALL_DIR}/.env" <<ENVEOF
-CLOUDFLARE_API_KEY=${CF_API_KEY}
-CLOUDFLARE_ZONE_ID=${CF_ZONE_ID}
-CLOUDFLARE_ACCOUNT_ID=${CF_ACCOUNT_ID}
-MONGO_URI=${MONGO_URI}
-CLOUDFLARE_DOMAIN=${DOMAIN}
-PORT=${PORT_NUM}
-UBUNTU_USERNAME=
-UBUNTU_PSW=
-UBUNTU_IP=
-NODE_ENV=production
-DOCKER_NETWORK=sycord_network
-WORKSPACE_BASE=${INSTALL_DIR}/workspace
-ENVEOF
-
-chmod 600 "${INSTALL_DIR}/.env"
-log ".env file created at ${INSTALL_DIR}/.env"
-
-# ────────────────────────────────────────────────────
-# 4. Install cloudflared
-# ────────────────────────────────────────────────────
-echo ""
-info "Installing cloudflared..."
-
-if command -v cloudflared >/dev/null 2>&1; then
-  log "cloudflared already installed: $(cloudflared version 2>&1 | head -1)"
-else
-  curl -fsSL https://pkg.cloudflare.com/cloudflare-main.gpg -o /usr/share/keyrings/cloudflare-main.gpg 2>/dev/null
-  echo "deb [signed-by=/usr/share/keyrings/cloudflare-main.gpg] https://pkg.cloudflare.com/cloudflared $(lsb_release -cs) main" \
-    > /etc/apt/sources.list.d/cloudflared.list
-  apt-get update -qq && apt-get install -y -qq cloudflared
-  log "cloudflared installed: $(cloudflared version 2>&1 | head -1)"
-fi
-
-# ────────────────────────────────────────────────────
-# 5. Authenticate & create wildcard tunnel
-# ────────────────────────────────────────────────────
-echo ""
-info "Configuring Cloudflare Tunnel..."
-
-CLOUDFLARED_CRED="${HOME}/.cloudflared"
-mkdir -p "${CLOUDFLARED_CRED}"
-
-# Create tunnel credentials file
-cat > "${CLOUDFLARED_CRED}/${CF_ACCOUNT_ID}.json" <<CREDEOF
-{"AccountTag":"${CF_ACCOUNT_ID}","TunnelSecret":"${CF_API_KEY}","TunnelID":"${CF_ACCOUNT_ID}"}
-CREDEOF
-
-# Create cloudflared config for wildcard tunnel
-cat > "${CLOUDFLARED_CRED}/config.yml" <<YAMLEOF
-tunnel: sycord-tunnel
-credentials-file: ${CLOUDFLARED_CRED}/${CF_ACCOUNT_ID}.json
-
-ingress:
-  - hostname: "*.${DOMAIN}"
-    service: http://localhost:${PORT_NUM}
-  - hostname: "${DOMAIN}"
-    service: http://localhost:${PORT_NUM}
-  - hostname: "api.${DOMAIN}"
-    service: http://localhost:${PORT_NUM}
-  - service: http_status:404
-YAMLEOF
-
-log "Cloudflare tunnel config created at ${CLOUDFLARED_CRED}/config.yml"
-
-# Login and create tunnel
-cloudflared tunnel login 2>/dev/null || true
-cloudflared tunnel create sycord-tunnel 2>/dev/null || log "Tunnel 'sycord-tunnel' may already exist"
-
-# Route DNS for wildcard
-cloudflared tunnel route dns sycord-tunnel "*.${DOMAIN}" 2>/dev/null || warn "Could not set wildcard DNS route automatically. Set it manually in Cloudflare dashboard."
-cloudflared tunnel route dns sycord-tunnel "${DOMAIN}" 2>/dev/null || true
-
-log "Cloudflare tunnel configured"
-
-# ────────────────────────────────────────────────────
-# 6. Clone/pull sycord-deamon
-# ────────────────────────────────────────────────────
-echo ""
-info "Cloning Sycord Deamon from ${GIT_REPO}..."
-
-DEAMON_DIR="${INSTALL_DIR}/sycord-deamon"
-if [[ -d "${DEAMON_DIR}/.git" ]]; then
-  git -C "${DEAMON_DIR}" pull origin main 2>/dev/null || warn "Could not pull latest daemon code"
-  log "Daemon repository updated"
-else
-  git clone "${GIT_REPO}" "${DEAMON_DIR}" 2>/dev/null || warn "Could not clone daemon repository (may not be public yet)"
-  log "Daemon repository cloned"
-fi
-
-# ────────────────────────────────────────────────────
-# 7. Copy runner source if running from different location
-# ────────────────────────────────────────────────────
-SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-
-if [[ "${SCRIPT_DIR}" != "${INSTALL_DIR}" ]]; then
-  info "Copying runner source files to ${INSTALL_DIR}..."
-  cp -a "${SCRIPT_DIR}/src" "${INSTALL_DIR}/" 2>/dev/null || true
-  cp -a "${SCRIPT_DIR}/bin" "${INSTALL_DIR}/" 2>/dev/null || true
-  cp -a "${SCRIPT_DIR}/docker" "${INSTALL_DIR}/" 2>/dev/null || true
-  cp "${SCRIPT_DIR}/package.json" "${INSTALL_DIR}/" 2>/dev/null || true
-  cp "${SCRIPT_DIR}/ecosystem.config.js" "${INSTALL_DIR}/" 2>/dev/null || true
-  cp "${SCRIPT_DIR}/api.json" "${INSTALL_DIR}/" 2>/dev/null || true
-  log "Source files copied"
-fi
-
-# ────────────────────────────────────────────────────
-# 8. Install npm dependencies
-# ────────────────────────────────────────────────────
-echo ""
-info "Installing Node.js dependencies..."
+info "Installing dependencies..."
 
 cd "${INSTALL_DIR}"
 npm install --production 2>&1 | tail -3
 log "Dependencies installed"
 
-# ────────────────────────────────────────────────────
-# 8b. Install sycord-runner CLI globally
-# ────────────────────────────────────────────────────
-info "Installing sycord-runner CLI command..."
-
-chmod +x "${INSTALL_DIR}/bin/runner.js"
-
-# Create global symlink so user can run 'sycord-runner' from anywhere
-ln -sf "${INSTALL_DIR}/bin/runner.js" /usr/local/bin/sycord-runner 2>/dev/null || {
-  warn "Could not create symlink at /usr/local/bin/sycord-runner"
-  warn "You can still run it with: node ${INSTALL_DIR}/bin/runner.js"
-}
-
-if command -v sycord-runner >/dev/null 2>&1; then
-  log "CLI installed: run 'sycord-runner' from any terminal"
-else
-  warn "CLI may not be on PATH. Add /usr/local/bin to your PATH or use full path."
-fi
+# Ensure scripts are executable
+chmod +x "${INSTALL_DIR}/bin/"*.js 2>/dev/null || true
 
 # ────────────────────────────────────────────────────
-# 9. Create Docker network
+# 4. Detect public IP
 # ────────────────────────────────────────────────────
 echo ""
-info "Setting up Docker network..."
+info "Detecting server IP..."
 
-docker network inspect sycord_network >/dev/null 2>&1 || docker network create sycord_network
-log "Docker network 'sycord_network' ready"
-
-# ────────────────────────────────────────────────────
-# 10. Install & configure PM2
-# ────────────────────────────────────────────────────
-echo ""
-info "Setting up PM2 process manager..."
-
-if ! command -v pm2 >/dev/null 2>&1; then
-  npm install -g pm2 2>&1 | tail -3
-  log "PM2 installed globally"
-fi
-
-# Generate ecosystem.config.js if not present
-if [[ ! -f "${INSTALL_DIR}/ecosystem.config.js" ]]; then
-  cat > "${INSTALL_DIR}/ecosystem.config.js" <<'ECOSYSTEM'
-module.exports = {
-  apps: [
-    {
-      name: 'sycord-runner',
-      script: 'src/index.js',
-      cwd: '/opt/sycord-runner',
-      env: { NODE_ENV: 'production' },
-      env_file: '.env',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      watch: false,
-      max_memory_restart: '512M',
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      error_file: '/var/log/sycord-runner-error.log',
-      out_file: '/var/log/sycord-runner-out.log',
-      merge_logs: true,
-    },
-    {
-      name: 'cloudflared-tunnel',
-      script: 'cloudflared',
-      args: 'tunnel run sycord-tunnel',
-      cwd: '/opt/sycord-runner',
-      interpreter: 'none',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      watch: false,
-      max_restarts: 10,
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      error_file: '/var/log/cloudflared-error.log',
-      out_file: '/var/log/cloudflared-out.log',
-      merge_logs: true,
-    },
-    {
-      name: 'sycord-watcher',
-      script: 'bin/watcher.js',
-      cwd: '/opt/sycord-runner',
-      instances: 1,
-      exec_mode: 'fork',
-      autorestart: true,
-      watch: false,
-      log_date_format: 'YYYY-MM-DD HH:mm:ss Z',
-      error_file: '/var/log/sycord-watcher-error.log',
-      out_file: '/var/log/sycord-watcher-out.log',
-      merge_logs: true,
-    },
-  ],
-};
-ECOSYSTEM
-fi
-
-# Stop existing processes if running
-pm2 delete all 2>/dev/null || true
-
-# Start PM2
-pm2 start "${INSTALL_DIR}/ecosystem.config.js"
-pm2 save
-pm2 startup systemd -u root --hp /root 2>/dev/null || pm2 startup
-
-log "PM2 configured and processes started"
-pm2 status
+PUBLIC_IP=$(curl -sf4 icanhazip.com 2>/dev/null || curl -sf4 ifconfig.me 2>/dev/null || hostname -I 2>/dev/null | awk '{print $1}' || echo "127.0.0.1")
 
 # ────────────────────────────────────────────────────
-# 11. Verify deployment
-# ────────────────────────────────────────────────────
-echo ""
-info "Verifying deployment..."
-sleep 3
-
-if pm2 show sycord-runner >/dev/null 2>&1; then
-  log "sycord-runner is running"
-else
-  warn "sycord-runner may have failed to start. Check logs: pm2 logs sycord-runner"
-fi
-
-if pm2 show cloudflared-tunnel >/dev/null 2>&1; then
-  log "cloudflared-tunnel is running"
-else
-  warn "cloudflared-tunnel may have failed to start. Check logs: pm2 logs cloudflared-tunnel"
-fi
-
-# ────────────────────────────────────────────────────
-# 12. Final summary
+# 5. Start web setup server
 # ────────────────────────────────────────────────────
 echo ""
 echo -e "${BOLD}${GREEN}╔══════════════════════════════════════════╗${NC}"
-echo -e "${BOLD}${GREEN}║     Sycord Runner Setup Complete!         ║${NC}"
+echo -e "${BOLD}${GREEN}║   Web Setup Wizard Starting...            ║${NC}"
 echo -e "${BOLD}${GREEN}╚══════════════════════════════════════════╝${NC}"
 echo ""
-echo -e "  API Endpoint:    ${CYAN}https://api.${DOMAIN}${NC}"
-echo -e "  Health Check:    ${CYAN}https://api.${DOMAIN}/api/health${NC}"
-echo -e "  Root Redirect:   ${DOMAIN} → https://sycord.com"
-echo -e "  Install Dir:     ${INSTALL_DIR}"
-echo -e "  CLI Command:     ${CYAN}sycord-runner${NC} (start|stop|status|logs|health|api)"
-echo -e "  PM2 Status:      sycord-runner status"
-echo -e "  API Calls:       sycord-runner api GET /api/deploy/projects"
+echo -e "  Open this URL in your browser:"
+echo -e "  ${BOLD}${CYAN}http://${PUBLIC_IP}:${SETUP_PORT}${NC}"
+echo ""
+echo -e "  Press Ctrl+C to stop the setup server."
 echo ""
 
-exit 0
+# If reconfigure, pre-load env for the web server
+if [[ "$RECONFIGURE" == "true" ]] && [[ -f "${INSTALL_DIR}/.env" ]]; then
+  export $(grep -v '^#' "${INSTALL_DIR}/.env" | xargs)
+  log "Loaded saved configuration for reconfigure"
+fi
+
+exec node "${INSTALL_DIR}/bin/setup-server.js"
