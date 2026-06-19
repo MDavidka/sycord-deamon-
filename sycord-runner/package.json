@@ -3,6 +3,9 @@
   "version": "1.0.0",
   "description": "Sycord Deployer Runner - Secure deployment bridge for managing Docker-based Next.js applications",
   "main": "src/index.js",
+  "bin": {
+    "sycord-runner": "./bin/runner.js"
+  },
   "scripts": {
     "start": "node src/index.js",
     "dev": "NODE_ENV=development node --watch src/index.js"

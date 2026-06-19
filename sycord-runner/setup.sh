@@ -175,6 +175,7 @@ SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
 if [[ "${SCRIPT_DIR}" != "${INSTALL_DIR}" ]]; then
   info "Copying runner source files to ${INSTALL_DIR}..."
   cp -a "${SCRIPT_DIR}/src" "${INSTALL_DIR}/" 2>/dev/null || true
+  cp -a "${SCRIPT_DIR}/bin" "${INSTALL_DIR}/" 2>/dev/null || true
   cp -a "${SCRIPT_DIR}/docker" "${INSTALL_DIR}/" 2>/dev/null || true
   cp "${SCRIPT_DIR}/package.json" "${INSTALL_DIR}/" 2>/dev/null || true
   cp "${SCRIPT_DIR}/ecosystem.config.js" "${INSTALL_DIR}/" 2>/dev/null || true
@@ -191,6 +192,25 @@ info "Installing Node.js dependencies..."
 cd "${INSTALL_DIR}"
 npm install --production 2>&1 | tail -3
 log "Dependencies installed"
+
+# ────────────────────────────────────────────────────
+# 8b. Install sycord-runner CLI globally
+# ────────────────────────────────────────────────────
+info "Installing sycord-runner CLI command..."
+
+chmod +x "${INSTALL_DIR}/bin/runner.js"
+
+# Create global symlink so user can run 'sycord-runner' from anywhere
+ln -sf "${INSTALL_DIR}/bin/runner.js" /usr/local/bin/sycord-runner 2>/dev/null || {
+  warn "Could not create symlink at /usr/local/bin/sycord-runner"
+  warn "You can still run it with: node ${INSTALL_DIR}/bin/runner.js"
+}
+
+if command -v sycord-runner >/dev/null 2>&1; then
+  log "CLI installed: run 'sycord-runner' from any terminal"
+else
+  warn "CLI may not be on PATH. Add /usr/local/bin to your PATH or use full path."
+fi
 
 # ────────────────────────────────────────────────────
 # 9. Create Docker network
@@ -296,9 +316,9 @@ echo -e "  API Endpoint:    ${CYAN}https://api.${DOMAIN}${NC}"
 echo -e "  Health Check:    ${CYAN}https://api.${DOMAIN}/api/health${NC}"
 echo -e "  Root Redirect:   ${DOMAIN} → https://sycord.com"
 echo -e "  Install Dir:     ${INSTALL_DIR}"
-echo -e "  PM2 Status:      pm2 status"
-echo -e "  PM2 Logs:        pm2 logs"
-echo -e "  Cloudflare Logs: pm2 logs cloudflared-tunnel"
+echo -e "  CLI Command:     ${CYAN}sycord-runner${NC} (start|stop|status|logs|health|api)"
+echo -e "  PM2 Status:      sycord-runner status"
+echo -e "  API Calls:       sycord-runner api GET /api/deploy/projects"
 echo ""
 
 exit 0

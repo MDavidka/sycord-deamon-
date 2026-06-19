@@ -103,10 +103,30 @@ curl -X POST https://api.sycord.site/api/deploy/projects/<projectId>/deploy \
 ## Management
 
 ```bash
-pm2 status              # View all processes
-pm2 logs sycord-runner  # API server logs
+# Using the sycord-runner CLI (installed system-wide after setup)
+sycord-runner start        # Start all services
+sycord-runner stop         # Stop all services
+sycord-runner restart      # Restart all services
+sycord-runner status       # Show PM2 + Docker status
+sycord-runner logs         # Watch live logs
+sycord-runner health       # Check API health
+sycord-runner api <method> <path> [-d <data>]  # Call any API endpoint
+
+# Direct PM2 commands
+pm2 status                 # View all processes
+pm2 logs sycord-runner     # API server logs
 pm2 logs cloudflared-tunnel  # Tunnel logs
-pm2 restart all         # Restart all processes
+pm2 restart all            # Restart all processes
+```
+
+### CLI API Examples
+
+```bash
+sycord-runner api GET /api/health
+sycord-runner api POST /api/deploy/projects -d '{"projectName":"my-app"}'
+sycord-runner api GET /api/deploy/projects
+sycord-runner api POST /api/deploy/projects/<id>/build
+sycord-runner api POST /api/deploy/projects/<id>/deploy
 ```
 
 ## Directory Structure
@@ -117,6 +137,8 @@ pm2 restart all         # Restart all processes
 ├── ecosystem.config.js  # PM2 process configuration
 ├── api.json             # OpenAPI specification
 ├── package.json         # Node.js dependencies
+├── bin/
+│   └── runner.js        # CLI tool (sycord-runner command)
 ├── src/
 │   ├── index.js         # Main server + domain router
 │   ├── config.js        # Configuration loader
